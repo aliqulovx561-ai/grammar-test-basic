@@ -2,13 +2,10 @@
   "name": "english-grammar-test",
   "version": "1.0.0",
   "description": "English Grammar Test with Telegram Reporting",
-  "main": "index.html",
   "scripts": {
-    "start": "vercel dev",
-    "dev": "vercel dev"
+    "start": "vercel dev"
   },
   "dependencies": {},
-  "devDependencies": {},
   "engines": {
     "node": ">=18.x"
   }
