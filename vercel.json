@@ -1,22 +1,37 @@
 {
   "functions": {
-    "api/submit-test.js": {
+    "api/submit.js": {
       "maxDuration": 10,
-      "memory": 1024
+      "memory": 256
     }
   },
   "rewrites": [
     {
-      "source": "/",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/api/submit-test",
-      "destination": "/api/submit-test.js"
+      "source": "/api/submit",
+      "destination": "/api/submit.js"
     }
   ],
-  "env": {
-    "TELEGRAM_BOT_TOKEN": "@telegram_bot_token",
-    "TELEGRAM_CHAT_ID": "@telegram_chat_id"
-  }
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Credentials",
+          "value": "true"
+        },
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET,OPTIONS,PATCH,DELETE,POST,PUT"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version"
+        }
+      ]
+    }
+  ]
 }
