@@ -292,4 +292,8 @@ async function sendToTelegram(message, botToken, chatId) {
     
     return results[0]; // Return first response
     
-  } catch
+  } catch (error) {
+    console.error('Error sending to Telegram:', error);
+    return { ok: false, error: error.message };
+  }
+}
