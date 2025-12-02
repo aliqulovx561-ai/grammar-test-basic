@@ -1,28 +1,58 @@
 export default async function handler(req, res) {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Handle OPTIONS request for CORS
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  // Only accept POST requests
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ 
+      success: false, 
+      error: 'Method not allowed' 
+    });
   }
 
   try {
-    const {
-      name,
-      score,
-      total,
-      timeUsed,
-      answers,
-      testDuration
-    } = req.body;
+    const { name, score, total, timeUsed, answers } = req.body;
 
-    // Get Telegram credentials from environment variables
+    // Validate required fields
+    if (!name || score === undefined || !total || !timeUsed || !answers) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields'
+      });
+    }
+
+    // Get environment variables
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
     const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
     // Check if Telegram credentials are set
     if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
       console.error('Telegram credentials not set in environment variables');
-      return res.status(500).json({
-        success: false,
-        error: 'Server configuration error'
+      // Still return success to user, but log error
+      console.log('Test result (Telegram not configured):', {
+        name,
+        score: `${score}/${total}`,
+        timeUsed: `${Math.floor(timeUsed / 60)}m ${timeUsed % 60}s`
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Test submitted successfully (Telegram not configured)',
+        data: {
+          name,
+          score,
+          total,
+          percentage: Math.round((score / total) * 100),
+          timeUsed
+        }
       });
     }
 
@@ -30,7 +60,6 @@ export default async function handler(req, res) {
     const minutes = Math.floor(timeUsed / 60);
     const seconds = timeUsed % 60;
     const timeFormatted = `${minutes}m ${seconds}s`;
-    const totalTimeFormatted = `${Math.floor(testDuration / 60)}m`;
 
     // Calculate percentage
     const percentage = Math.round((score / total) * 100);
@@ -45,10 +74,11 @@ export default async function handler(req, res) {
     });
     const testTime = now.toLocaleTimeString('en-US', {
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      hour12: true
     });
 
-    // Group answers by section for analysis
+    // Group answers by section
     const sections = {};
     answers.forEach(answer => {
       if (!sections[answer.section]) {
@@ -60,240 +90,214 @@ export default async function handler(req, res) {
       }
     });
 
-    // ==================== PREPARE DETAILED TELEGRAM REPORT ====================
+    // Create detailed report for Telegram
+    let report = `📊 *ENGLISH GRAMMAR TEST RESULT*\n\n`;
     
-    let report = `📊 *ENGLISH GRAMMAR TEST - DETAILED REPORT*\n\n`;
-    
-    // Candidate Information
-    report += `*👤 CANDIDATE INFORMATION*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━\n`;
-    report += `• Name: ${name}\n`;
-    report += `• Test Date: ${testDate}\n`;
-    report += `• Test Time: ${testTime}\n`;
-    report += `• Duration: ${timeFormatted} / ${totalTimeFormatted}\n\n`;
+    // Header
+    report += `*Candidate:* ${name}\n`;
+    report += `*Date:* ${testDate}\n`;
+    report += `*Time:* ${testTime}\n`;
+    report += `*Duration:* ${timeFormatted}\n\n`;
     
     // Overall Score
-    report += `*🎯 OVERALL PERFORMANCE*\n`;
+    report += `*OVERALL SCORE*\n`;
     report += `━━━━━━━━━━━━━━━━━━━━\n`;
-    report += `• Score: ${score}/${total}\n`;
-    report += `• Percentage: ${percentage}%\n`;
+    report += `🎯 *${score}/${total} (${percentage}%)*\n\n`;
     
-    // Add performance emoji
-    let performanceEmoji = '';
-    if (percentage >= 90) performanceEmoji = '🏆 EXCELLENT';
-    else if (percentage >= 75) performanceEmoji = '🎯 VERY GOOD';
-    else if (percentage >= 60) performanceEmoji = '👍 GOOD';
-    else if (percentage >= 50) performanceEmoji = '📚 FAIR';
-    else performanceEmoji = '📖 NEEDS IMPROVEMENT';
+    // Performance rating
+    let rating = '';
+    if (percentage >= 90) rating = '🏆 EXCELLENT';
+    else if (percentage >= 80) rating = '🎯 VERY GOOD';
+    else if (percentage >= 70) rating = '👍 GOOD';
+    else if (percentage >= 60) rating = '📚 SATISFACTORY';
+    else if (percentage >= 50) rating = '⚠️ NEEDS IMPROVEMENT';
+    else rating = '📖 UNSATISFACTORY';
     
-    report += `• Performance: ${performanceEmoji}\n\n`;
+    report += `*Performance:* ${rating}\n\n`;
     
-    // Section-wise Analysis
-    report += `*📈 SECTION-WISE ANALYSIS*\n`;
+    // Section-wise breakdown
+    report += `*SECTION-WISE PERFORMANCE*\n`;
     report += `━━━━━━━━━━━━━━━━━━━━\n`;
     
     for (const [section, data] of Object.entries(sections)) {
       const sectionPercent = Math.round((data.correct / data.total) * 100);
+      const progressBar = createProgressBar(sectionPercent);
       
-      // Choose emoji based on performance
-      let sectionEmoji = '❌';
-      if (sectionPercent >= 80) sectionEmoji = '✅';
-      else if (sectionPercent >= 60) sectionEmoji = '⚠️';
+      let emoji = '❌';
+      if (sectionPercent >= 80) emoji = '✅';
+      else if (sectionPercent >= 60) emoji = '⚠️';
       
-      // Create progress bar
-      const progressBarLength = 10;
-      const filledLength = Math.round((sectionPercent / 100) * progressBarLength);
-      const emptyLength = progressBarLength - filledLength;
-      const progressBar = '█'.repeat(filledLength) + '░'.repeat(emptyLength);
-      
-      report += `${sectionEmoji} *${section}*\n`;
+      report += `${emoji} *${section}*\n`;
       report += `   ${progressBar} ${sectionPercent}%\n`;
-      report += `   Score: ${data.correct}/${data.total}\n\n`;
+      report += `   ${data.correct}/${data.total} correct\n\n`;
     }
     
-    // Question-by-Question Breakdown
-    report += `*📝 QUESTION-BY-QUESTION BREAKDOWN*\n`;
+    // Weak areas
+    const weakAreas = Object.entries(sections)
+      .filter(([_, data]) => (data.correct / data.total) < 0.7)
+      .map(([section]) => section);
+    
+    if (weakAreas.length > 0) {
+      report += `*AREAS NEEDING IMPROVEMENT*\n`;
+      report += `━━━━━━━━━━━━━━━━━━━━\n`;
+      weakAreas.forEach(area => {
+        report += `• ${area}\n`;
+      });
+      report += `\n`;
+    }
+    
+    // Detailed question analysis (first 5 questions)
+    report += `*SAMPLE QUESTIONS ANALYSIS*\n`;
     report += `━━━━━━━━━━━━━━━━━━━━\n`;
     
-    answers.forEach((answer, index) => {
-      const qNumber = index + 1;
+    const sampleQuestions = answers.slice(0, 5);
+    sampleQuestions.forEach((answer, index) => {
       const emoji = answer.isCorrect ? '✅' : '❌';
-      const status = answer.isCorrect ? 'Correct' : 'Incorrect';
-      
-      report += `${emoji} *Q${qNumber}:* ${status}\n`;
-      report += `   • Section: ${answer.section}\n`;
-      report += `   • Your Answer: ${answer.userAnswer}\n`;
-      report += `   • Correct Answer: ${answer.correctAnswer}\n`;
-      
+      report += `${emoji} Q${index + 1}: ${answer.question}\n`;
+      report += `   Your answer: ${answer.userAnswer}\n`;
       if (!answer.isCorrect) {
-        report += `   • Result: ❌ Needs review\n`;
+        report += `   Correct: ${answer.correctAnswer}\n`;
       }
-      
       report += `\n`;
     });
     
-    // Weak Areas
-    report += `*🎯 AREAS FOR IMPROVEMENT*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━\n`;
-    
-    const weakSections = Object.entries(sections)
-      .filter(([_, data]) => (data.correct / data.total) < 0.7)
-      .map(([section, data]) => {
-        const percent = Math.round((data.correct / data.total) * 100);
-        return { section, percent };
-      });
-    
-    if (weakSections.length > 0) {
-      weakSections.forEach(({ section, percent }) => {
-        report += `• *${section}:* ${percent}% (Below 70%)\n`;
-      });
-    } else {
-      report += `🎉 All sections performed well!\n`;
-    }
-    report += `\n`;
-    
     // Recommendations
-    report += `*💡 RECOMMENDATIONS*\n`;
+    report += `*RECOMMENDATIONS*\n`;
     report += `━━━━━━━━━━━━━━━━━━━━\n`;
     
-    if (percentage >= 90) {
-      report += `• Excellent performance! Maintain your study habits.\n`;
+    if (percentage >= 80) {
+      report += `• Excellent performance! Maintain regular practice.\n`;
       report += `• Consider more advanced grammar topics.\n`;
-    } else if (percentage >= 75) {
-      report += `• Good performance. Focus on weak areas.\n`;
-      report += `• Practice regularly to maintain consistency.\n`;
     } else if (percentage >= 60) {
-      report += `• Fair performance. Review all incorrect answers.\n`;
-      report += `• Focus on sections below 70%.\n`;
+      report += `• Good effort. Focus on weak areas.\n`;
+      report += `• Review incorrect answers.\n`;
     } else {
-      report += `• Needs improvement. Review basic grammar rules.\n`;
+      report += `• Review basic grammar rules.\n`;
       report += `• Practice each section thoroughly.\n`;
+      report += `• Take the test again after studying.\n`;
     }
     
-    if (weakSections.length > 0) {
-      report += `• Priority: Focus on `;
-      report += weakSections.map(ws => ws.section).join(', ');
-      report += `\n`;
-    }
-    
-    report += `\n*📊 Test completed successfully!*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━\n`;
+    report += `\nTest completed successfully! 🎉`;
 
-    // ==================== SEND TO TELEGRAM ====================
-    
+    // Send to Telegram
     try {
-      const telegramResponse = await sendToTelegram(report, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID);
+      const telegramResult = await sendToTelegram(report, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID);
       
-      if (!telegramResponse.ok) {
-        console.error('Failed to send to Telegram:', telegramResponse);
-      }
-      
-      // Log to console for debugging
-      console.log('Test submitted:', {
+      console.log('Test submitted successfully:', {
         name,
         score: `${score}/${total}`,
         percentage: `${percentage}%`,
         timeUsed: timeFormatted,
-        telegramSent: telegramResponse.ok
+        telegramSent: telegramResult.ok
       });
 
       return res.status(200).json({
         success: true,
         message: 'Test submitted successfully',
-        details: {
+        data: {
           name,
-          score: `${score}/${total}`,
-          percentage: `${percentage}%`,
+          score,
+          total,
+          percentage,
           timeUsed: timeFormatted,
-          telegramSent: telegramResponse.ok
+          telegramSent: telegramResult.ok
         }
       });
-
+      
     } catch (telegramError) {
       console.error('Telegram error:', telegramError);
       
-      // Still return success to user even if Telegram fails
+      // Still return success to user
       return res.status(200).json({
         success: true,
         message: 'Test submitted (Telegram notification failed)',
-        details: {
+        data: {
           name,
-          score: `${score}/${total}`,
-          percentage: `${percentage}%`,
-          timeUsed: timeFormatted,
-          telegramSent: false
+          score,
+          total,
+          percentage,
+          timeUsed: timeFormatted
         }
       });
     }
 
   } catch (error) {
-    console.error('Error in submit-test handler:', error);
+    console.error('Error processing submission:', error);
+    
     return res.status(500).json({
       success: false,
       error: 'Internal server error',
-      message: error.message
+      details: error.message
     });
   }
 }
 
+// Helper function to create progress bar
+function createProgressBar(percentage) {
+  const filled = Math.round(percentage / 10);
+  const empty = 10 - filled;
+  return '█'.repeat(filled) + '░'.repeat(empty);
+}
+
+// Function to send message to Telegram
 async function sendToTelegram(message, botToken, chatId) {
   try {
-    // Split message if too long (Telegram has 4096 character limit)
+    // Split message if too long (Telegram limit: 4096 characters)
     const maxLength = 4000;
-    const messages = [];
+    let messages = [message];
     
     if (message.length > maxLength) {
       // Split by sections
       const sections = message.split('━━━━━━━━━━━━━━━━━━━━\n');
+      messages = [];
       let currentMessage = '';
       
       for (const section of sections) {
-        if ((currentMessage + section).length > maxLength) {
-          messages.push(currentMessage);
-          currentMessage = section;
+        const sectionWithHeader = '━━━━━━━━━━━━━━━━━━━━\n' + section;
+        if ((currentMessage + sectionWithHeader).length > maxLength) {
+          if (currentMessage) messages.push(currentMessage);
+          currentMessage = sectionWithHeader;
         } else {
-          currentMessage += (currentMessage ? '━━━━━━━━━━━━━━━━━━━━\n' : '') + section;
+          currentMessage += sectionWithHeader;
         }
       }
-      if (currentMessage) {
-        messages.push(currentMessage);
-      }
-    } else {
-      messages.push(message);
+      if (currentMessage) messages.push(currentMessage);
     }
     
-    // Send all message parts
-    const results = [];
-    for (const msg of messages) {
-      const response = await fetch(
-        `https://api.telegram.org/bot${botToken}/sendMessage`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: msg,
-            parse_mode: 'Markdown',
-            disable_web_page_preview: true
-          })
-        }
-      );
+    // Send all messages
+    for (let i = 0; i < messages.length; i++) {
+      const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: messages[i],
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true
+        })
+      });
       
       const result = await response.json();
-      results.push(result);
       
-      // Wait a bit between messages to avoid rate limiting
-      if (messages.length > 1) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+      // Wait between messages to avoid rate limiting
+      if (i < messages.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      
+      if (!result.ok) {
+        throw new Error(result.description || 'Telegram API error');
       }
     }
     
-    return results[0]; // Return first response
+    return { ok: true };
     
   } catch (error) {
-    console.error('Error sending to Telegram:', error);
-    return { ok: false, error: error.message };
+    console.error('Telegram API error:', error);
+    return { 
+      ok: false, 
+      error: error.message 
+    };
   }
 }
